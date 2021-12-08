@@ -1,0 +1,13 @@
+FROM node:12.18.1-alpine
+
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+COPY ./src ./src
+
+# Install only the production dependencies using npm.
+RUN npm install --only=production
+
+# Must be the same as microservices.tf->local.rabbitmq
+#CMD npx wait-port mem-rabbit.memories.svc.cluster.local:5672 && \
+CMD npm start

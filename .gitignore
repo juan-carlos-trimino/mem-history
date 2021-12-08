@@ -1,0 +1,20 @@
+# Ignore everything.
+**
+
+# But include these files...
+!.gitignore
+!LICENSE
+!README.md
+
+# ... and these files under the 'history' directory...
+!history/
+history/*
+!history/.dockerignore
+!history/Dockerfile-dev
+!history/Dockerfile-prod
+!history/package.json
+!history/package-lock.json
+# ... and these directories...
+!history/src
+history/src/*
+!history/src/index.js
