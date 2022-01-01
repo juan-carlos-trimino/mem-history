@@ -16,18 +16,57 @@ const mongodb = require("mongodb");
 const mongodbClient = require('mongodb').MongoClient;
 const amqp = require("amqplib");
 const bodyParser = require("body-parser");
+const { randomUUID } = require('crypto');
+const winston = require('winston');
 
 /******
 Globals
 ******/
 //Create a new express instance.
 const app = express();
+const SVC_NAME = "history";
 const DB_NAME = process.env.DB_NAME;
 const SVC_DNS_DB = process.env.SVC_DNS_DB;
 const SVC_DNS_RABBITMQ = process.env.SVC_DNS_RABBITMQ;
 const PORT = process.env.PORT && parseInt(process.env.PORT) || 3000;
 const MAX_RETRIES = process.env.MAX_RETRIES && parseInt(process.env.MAX_RETRIES) || 10;
 let READINESS_PROBE = false;
+
+/***
+Resume Operation
+----------------
+The resume operation strategy intercepts unexpected errors and responds by allowing the process to
+continue.
+***/
+process.on('uncaughtException',
+err => {
+  logger.error(`${SVC_NAME} - Uncaught exception.`);
+  logger.error(err && err.stack || err);
+})
+
+/***
+Abort and Restart
+-----------------
+***/
+// process.on("uncaughtException",
+// err => {
+//   console.error("Uncaught exception:");
+//   console.error(err && err.stack || err);
+//   process.exit(1);
+// })
+
+//Winston requires at least one transport (location to save the log) to create a log.
+const logConfiguration = {
+  transports: [ new winston.transports.Console() ],
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSSSS' }),
+    winston.format.printf(msg => `${msg.timestamp} ${msg.level} ${msg.message}`)
+  ),
+  exitOnError: false
+}
+
+//Create a logger and pass it the Winston configuration object.
+const logger = winston.createLogger(logConfiguration);
 
 /***
 Unlike most other programming languages or runtime environments, Node.js doesn't have a built-in
@@ -38,112 +77,88 @@ Accessing the main module
 When a file is run directly from Node.js, require.main is set to its module. That means that it is
 possible to determine whether a file has been run directly by testing require.main === module.
 ***/
-if (require.main === module)
-{
+if (require.main === module) {
   main()
-  .then(() =>
-  {
+  .then(() => {
     READINESS_PROBE = true;
-    console.log(`Microservice "history" is listening on port "${PORT}"!`);
+    logger.info(`${SVC_NAME} - Microservice is listening on port "${PORT}"!`);
   })
-  .catch(err =>
-  {
-    console.error('Microservice "history" failed to start.');
-    console.error(err && err.stack || err);
+  .catch(err => {
+    logger.error(`${SVC_NAME} - Microservice failed to start.`);
+    logger.error(err && err.stack || err);
   });
 }
 
-function main()
-{
+function main() {
   //Throw exception if any required environment variables are missing.
-  if (process.env.SVC_DNS_DB === undefined)
-  {
+  if (process.env.SVC_DNS_DB === undefined) {
     throw new Error('Please specify the service DNS for the database in the environment variable SVC_DNS_DB.');
   }
-  else if (process.env.DB_NAME === undefined)
-  {
+  else if (process.env.DB_NAME === undefined) {
     throw new Error('Please specify the name of the database in the environment variable DB_NAME.');
   }
-  else if (process.env.SVC_DNS_RABBITMQ === undefined)
-  {
+  else if (process.env.SVC_DNS_RABBITMQ === undefined) {
     throw new Error('Please specify the name of the service DNS for RabbitMQ in the environment variable SVC_DNS_RABBITMQ.');
   }
   //Display a message if any optional environment variables are missing.
-  else
-  {
-    if (process.env.PORT === undefined)
-    {
-      console.log('The environment variable PORT for the HTTP server is missing; using port 3000.');
+  else {
+    if (process.env.PORT === undefined) {
+      logger.info(`${SVC_NAME} - The environment variable PORT for the HTTP server is missing; using port ${PORT}.`);
     }
     //
-    if (process.env.MAX_RETRIES === undefined)
-    {
-      console.log(`The environment variable MAX_RETRIES is missing; using MAX_RETRIES=${MAX_RETRIES}.`);
+    if (process.env.MAX_RETRIES === undefined) {
+      logger.info(`${SVC_NAME} - The environment variable MAX_RETRIES is missing; using MAX_RETRIES=${MAX_RETRIES}.`);
     }
   }
   return requestWithRetry(connectToDb, SVC_DNS_DB, MAX_RETRIES)  //Connect to the database...
-  .then(dbConn =>                                                //then...
-  {
+  .then(dbConn => {                                              //then...
     return requestWithRetry(connectToRabbitMQ, SVC_DNS_RABBITMQ, MAX_RETRIES)  //connect to RabbitMQ...
-    .then(conn =>
-    {
+    .then(conn => {
       //Create a RabbitMQ messaging channel.
       return conn.createChannel();
     })
-    .then(channel =>                            //then...
-    {
+    .then(channel => {                          //then...
       return startHttpServer(dbConn, channel);  //start the HTTP server.
     });
   });
 }
 
-function connectToDb(url, currentRetry)
-{
-  console.log(`Connecting (${currentRetry}) to 'MongoDB' at ${url}/database(${DB_NAME}).`);
+function connectToDb(url, currentRetry) {
+  logger.info(`${SVC_NAME} - Connecting (${currentRetry}) to 'MongoDB' at ${url}/database(${DB_NAME}).`);
   return mongodbClient
   .connect(url, { useUnifiedTopology: true })
-  .then(client =>
-  {
-    console.log(`Connected to mongodb database '${DB_NAME}'.`);
+  .then(client => {
+    logger.info(`${SVC_NAME} - Connected to mongodb database '${DB_NAME}'.`);
     return client.db(DB_NAME);
   });
 }
 
-function connectToRabbitMQ(url, currentRetry)
-{
-  console.log(`Connecting (${currentRetry}) to 'RabbitMQ' at ${url}.`);
+function connectToRabbitMQ(url, currentRetry) {
+  logger.info(`${SVC_NAME} - Connecting (${currentRetry}) to 'RabbitMQ' at ${url}.`);
   return amqp.connect(url)
-  .then(conn =>
-  {
-    console.log("Connected to RabbitMQ.");
+  .then(conn => {
+    logger.info(`${SVC_NAME} - Connected to RabbitMQ.`);
     return conn;
   });
 }
 
-async function sleep(timeout)
-{
-  return new Promise(resolve =>
-  {
+async function sleep(timeout) {
+  return new Promise(resolve => {
     setTimeout(() => { resolve(); }, timeout);
   });
 }
 
-async function requestWithRetry(func, url, maxRetry)
-{
-  for (let currentRetry = 0;;)
-  {
-    try
-    {
+async function requestWithRetry(func, url, maxRetry) {
+  for (let currentRetry = 0;;) {
+    try {
       ++currentRetry;
       return await func(url, currentRetry);
     }
-    catch(err)
-    {
-      if (currentRetry === maxRetry)
-      {
+    catch(err) {
+      if (currentRetry === maxRetry) {
         //Save the error from the most recent attempt.
         lastError = err;
-        console.log(`Maximum number of ${maxRetry} retries has been reached.`);
+        logger.info(`${SVC_NAME} - Maximum number of ${maxRetry} retries has been reached.`);
         break;
       }
       const timeout = (Math.pow(2, currentRetry) - 1) * 100;
@@ -156,53 +171,45 @@ async function requestWithRetry(func, url, maxRetry)
 }
 
 //Start the HTTP server.
-function startHttpServer(db, channel)
-{
+function startHttpServer(db, channel) {
   //Notify when the server has started.
-  return new Promise(resolve =>
-  {
+  return new Promise(resolve => {
     app.use(bodyParser.json());  //Enable JSON body for HTTP requests.
     setupHandlers(db, channel);
     app.listen(PORT,
-    () =>
-    {
+    () => {
       resolve();  //HTTP server is listening, resolve the promise.
     });
   });
 }
 
 //Setup event handlers.
-function setupHandlers(db, channel)
-{
+function setupHandlers(db, channel) {
   //Readiness probe.
   app.get('/readiness',
-  (req, res) =>
-  {
+  (req, res) => {
     res.sendStatus(READINESS_PROBE === true ? 200 : 500);
   });
   //
   const videosCollection = db.collection('videos');
   //HTTP GET API to retrieve video viewing history.
   app.get('/videos',
-  (req, res) =>
-  {
+  (req, res) => {
     videosCollection.find()  //Retrieve video list from database.
     .toArray()             //In a real application this should be paginated.
-    .then(videos =>
-    {
+    .then(videos => {
       res.json({ videos });
     })
-    .catch(err =>
-    {
+    .catch(err => {
       console.error('Failed to get videos collection.');
-      console.error(err);
+      logger.error("Failed to get videos collection from database!");
+      logger.info(`${SVC_NAME} - ${err}`);
       res.sendStatus(500);
     });
   });
   //
   //Function to handle incoming messages.
-  function consumeViewedMessage(msg)
-  {
+  function consumeViewedMessage(msg) {
     console.log('Received a "viewed" message.');
     /***
     Parse the JSON message to a JavaScript object.
@@ -213,8 +220,7 @@ function setupHandlers(db, channel)
     return videosCollection
     //Record the view in the history database.
     .insertOne({ videoId: parsedMsg.video.id, watched: new Date() })
-    .then(() =>
-    {
+    .then(() => {
       console.log('Acknowledging message was handled.');
       channel.ack(msg);  //If there is no error, acknowledge the message.
     });
@@ -270,8 +276,7 @@ function setupHandlers(db, channel)
   });
   ***/
   return channel.assertQueue('viewed', { exclusive: false })
-  .then(() =>
-  {
+  .then(() => {
     return channel.consume('viewed', consumeViewedMessage);
   });
 }
