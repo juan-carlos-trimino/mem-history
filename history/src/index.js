@@ -16,7 +16,6 @@ const mongodb = require("mongodb");
 const mongodbClient = require('mongodb').MongoClient;
 const amqp = require("amqplib");
 const bodyParser = require("body-parser");
-const { randomUUID } = require('crypto');
 const winston = require('winston');
 
 /******
@@ -41,7 +40,8 @@ continue.
 process.on('uncaughtException',
 err => {
   logger.error(`${SVC_NAME} - Uncaught exception.`);
-  logger.error(err && err.stack || err);
+  logger.error(`${SVC_NAME} - ${err}`);
+  logger.error(`${SVC_NAME} - ${err.stack}`);
 })
 
 /***
@@ -85,7 +85,8 @@ if (require.main === module) {
   })
   .catch(err => {
     logger.error(`${SVC_NAME} - Microservice failed to start.`);
-    logger.error(err && err.stack || err);
+    logger.error(`${SVC_NAME} - ${err}`);
+    logger.error(`${SVC_NAME} - ${err.stack}`);
   });
 }
 
@@ -162,7 +163,7 @@ async function requestWithRetry(func, url, maxRetry) {
         break;
       }
       const timeout = (Math.pow(2, currentRetry) - 1) * 100;
-      console.log(`Waiting ${timeout}ms...`);
+      logger.log(`${SVC_NAME} - Waiting ${timeout}ms...`);
       await sleep(timeout);
     }
   }
@@ -195,33 +196,35 @@ function setupHandlers(db, channel) {
   //HTTP GET API to retrieve video viewing history.
   app.get('/videos',
   (req, res) => {
+    const cid = req.headers['X-Correlation-Id'];
     videosCollection.find()  //Retrieve video list from database.
     .toArray()             //In a real application this should be paginated.
     .then(videos => {
+      logger.info(`${SVC_NAME} ${cid} - Retrieved the viewing history from the database.`);
       res.json({ videos });
     })
     .catch(err => {
-      console.error('Failed to get videos collection.');
-      logger.error("Failed to get videos collection from database!");
-      logger.info(`${SVC_NAME} - ${err}`);
+      logger.error(`${SVC_NAME} ${cid} - Failed to retrieve the viewing history from the database.`);
+      logger.error(`${SVC_NAME} ${cid} - ${err}`);
       res.sendStatus(500);
     });
   });
   //
   //Function to handle incoming messages.
   function consumeViewedMessage(msg) {
-    console.log('Received a "viewed" message.');
     /***
     Parse the JSON message to a JavaScript object.
     RabbitMQ doesn't natively support JSON. RabbitMQ is actually agnostic about the format for the
     message payload, and from its point of view, a message is just a blob of binary data.
     ***/
     const parsedMsg = JSON.parse(msg.content.toString());
+    const cid = parsedMsg.video.cid;
+    logger.info(`${SVC_NAME} ${cid} - Received a "viewed" message.`);
     return videosCollection
     //Record the view in the history database.
     .insertOne({ videoId: parsedMsg.video.id, watched: new Date() })
     .then(() => {
-      console.log('Acknowledging message was handled.');
+      logger.info(`${SVC_NAME} ${cid} - Acknowledging message was handled.`);
       channel.ack(msg);  //If there is no error, acknowledge the message.
     });
   };
