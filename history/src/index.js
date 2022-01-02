@@ -163,7 +163,7 @@ async function requestWithRetry(func, url, maxRetry) {
         break;
       }
       const timeout = (Math.pow(2, currentRetry) - 1) * 100;
-      logger.log(`${SVC_NAME} - Waiting ${timeout}ms...`);
+      logger.info(`${SVC_NAME} - Waiting ${timeout}ms...`);
       await sleep(timeout);
     }
   }
