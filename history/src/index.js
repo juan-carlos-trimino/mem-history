@@ -196,7 +196,12 @@ function setupHandlers(db, channel) {
   //HTTP GET API to retrieve video viewing history.
   app.get('/videos',
   (req, res) => {
-    const cid = req.headers['X-Correlation-Id'];
+  /***
+  In the HTTP protocol, headers are case-insensitive; however, the Express framework converts
+  everything to lower case. Unfortunately, for objects in JavaScript, their property names are
+  case-sensitive.
+  ***/
+  const cid = req.headers['x-correlation-id'];
     videosCollection.find()  //Retrieve video list from database.
     .toArray()             //In a real application this should be paginated.
     .then(videos => {
