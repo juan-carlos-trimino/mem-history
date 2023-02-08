@@ -60,8 +60,7 @@ Abort and Restart
 const logConfiguration = {
   transports: [ new winston.transports.Console() ],
   format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSSSS' }),
-    winston.format.json()
+    winston.format.timestamp(), winston.format.json()
   ),
   exitOnError: false
 }
