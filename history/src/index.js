@@ -23,7 +23,8 @@ Globals
 ******/
 //Create a new express instance.
 const app = express();
-const SVC_NAME = "history";
+const SVC_NAME = process.env.SVC_NAME;
+const APP_NAME_VER = process.env.APP_NAME_VER;
 const DB_NAME = process.env.DB_NAME;
 const SVC_DNS_DB = process.env.SVC_DNS_DB;
 const SVC_DNS_RABBITMQ = process.env.SVC_DNS_RABBITMQ;
@@ -39,9 +40,9 @@ continue.
 ***/
 process.on('uncaughtException',
 err => {
-  logger.error(`${SVC_NAME} - Uncaught exception.`);
-  logger.error(`${SVC_NAME} - ${err}`);
-  logger.error(`${SVC_NAME} - ${err.stack}`);
+  logger.error('Uncaught exception.', { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
+  logger.error(err, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
+  logger.error(err.stack, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
 })
 
 /***
@@ -57,10 +58,14 @@ Abort and Restart
 
 //Winston requires at least one transport (location to save the log) to create a log.
 const logConfiguration = {
-  transports: [ new winston.transports.Console() ],
+  transports: [
+    new winston.transports.Console()
+  ],
   format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSSSS' }),
-    winston.format.printf(msg => `${msg.timestamp} ${msg.level} ${msg.message}`)
+    winston.format.timestamp({
+      format: 'YYYY-MM-DD hh:mm:ss.SSS'
+    }),
+    winston.format.json()
   ),
   exitOnError: false
 }
@@ -81,12 +86,12 @@ if (require.main === module) {
   main()
   .then(() => {
     READINESS_PROBE = true;
-    logger.info(`${SVC_NAME} - Microservice is listening on port "${PORT}"!`);
+    logger.info(`Microservice is listening on port ${PORT}!`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
   })
   .catch(err => {
-    logger.error(`${SVC_NAME} - Microservice failed to start.`);
-    logger.error(`${SVC_NAME} - ${err}`);
-    logger.error(`${SVC_NAME} - ${err.stack}`);
+    logger.error('Microservice failed to start.', { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
+    logger.error(err, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
+    logger.error(err.stack, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
   });
 }
 
@@ -104,11 +109,11 @@ function main() {
   //Display a message if any optional environment variables are missing.
   else {
     if (process.env.PORT === undefined) {
-      logger.info(`${SVC_NAME} - The environment variable PORT for the HTTP server is missing; using port ${PORT}.`);
+      logger.info(`The environment variable PORT for the HTTP server is missing; using port ${PORT}.`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
     }
     //
     if (process.env.MAX_RETRIES === undefined) {
-      logger.info(`${SVC_NAME} - The environment variable MAX_RETRIES is missing; using MAX_RETRIES=${MAX_RETRIES}.`);
+      logger.info(`The environment variable MAX_RETRIES is missing; using MAX_RETRIES=${MAX_RETRIES}.`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
     }
   }
   return requestWithRetry(connectToDb, SVC_DNS_DB, MAX_RETRIES)  //Connect to the database...
@@ -125,20 +130,20 @@ function main() {
 }
 
 function connectToDb(url, currentRetry) {
-  logger.info(`${SVC_NAME} - Connecting (${currentRetry}) to 'MongoDB' at ${url}/database(${DB_NAME}).`);
+  logger.info(`Connecting (${currentRetry}) to MongoDB at ${url}/database(${DB_NAME}).`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
   return mongodbClient
   .connect(url, { useUnifiedTopology: true })
   .then(client => {
-    logger.info(`${SVC_NAME} - Connected to mongodb database '${DB_NAME}'.`);
+    logger.info(`Connected to the MongoDB database ${DB_NAME}.`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
     return client.db(DB_NAME);
   });
 }
 
 function connectToRabbitMQ(url, currentRetry) {
-  logger.info(`${SVC_NAME} - Connecting (${currentRetry}) to 'RabbitMQ' at ${url}.`);
+  logger.info(`Connecting (${currentRetry}) to RabbitMQ at ${url}.`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
   return amqp.connect(url)
   .then(conn => {
-    logger.info(`${SVC_NAME} - Connected to RabbitMQ.`);
+    logger.info('Connected to RabbitMQ.', { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
     return conn;
   });
 }
@@ -159,11 +164,11 @@ async function requestWithRetry(func, url, maxRetry) {
       if (currentRetry === maxRetry) {
         //Save the error from the most recent attempt.
         lastError = err;
-        logger.info(`${SVC_NAME} - Maximum number of ${maxRetry} retries has been reached.`);
+        logger.info(`Maximum number of ${maxRetry} retries has been reached.`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
         break;
       }
       const timeout = (Math.pow(2, currentRetry) - 1) * 100;
-      logger.info(`${SVC_NAME} - Waiting ${timeout}ms...`);
+      logger.info(`Waiting ${timeout}ms...`, { app:APP_NAME_VER, service:SVC_NAME, requestId:'-1' });
       await sleep(timeout);
     }
   }
@@ -205,12 +210,12 @@ function setupHandlers(db, channel) {
     videosCollection.find()  //Retrieve video list from database.
     .toArray()             //In a real application this should be paginated.
     .then(videos => {
-      logger.info(`${SVC_NAME} ${cid} - Retrieved the viewing history from the database.`);
+      logger.info('Retrieved the viewing history from the database.', { app:APP_NAME_VER, service:SVC_NAME, requestId:cid });
       res.json({ videos });
     })
     .catch(err => {
-      logger.error(`${SVC_NAME} ${cid} - Failed to retrieve the viewing history from the database.`);
-      logger.error(`${SVC_NAME} ${cid} - ${err}`);
+      logger.error('Failed to retrieve the viewing history from the database.', { app:APP_NAME_VER, service:SVC_NAME, requestId:cid });
+      logger.error(err, { app:APP_NAME_VER, service:SVC_NAME, requestId:cid });
       res.sendStatus(500);
     });
   });
@@ -224,12 +229,12 @@ function setupHandlers(db, channel) {
     ***/
     const parsedMsg = JSON.parse(msg.content.toString());
     const cid = parsedMsg.video.cid;
-    logger.info(`${SVC_NAME} ${cid} - Received a "viewed" message.`);
+    logger.info('Received a viewed message.', { app:APP_NAME_VER, service:SVC_NAME, requestId:cid });
     return videosCollection
     //Record the view in the history database.
     .insertOne({ videoId: parsedMsg.video.id, watched: new Date() })
     .then(() => {
-      logger.info(`${SVC_NAME} ${cid} - Acknowledging message was handled.`);
+      logger.info('Acknowledging message was handled.', { app:APP_NAME_VER, service:SVC_NAME, requestId:cid });
       channel.ack(msg);  //If there is no error, acknowledge the message.
     });
   };
